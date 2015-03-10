@@ -1,5 +1,5 @@
 /*
- * Copyright Adam Pritchard 2013
+ * Copyright Adam Pritchard 2014
  * MIT License : http://adampritchard.mit-license.org/
  */
 
@@ -31,6 +31,14 @@
  */
 
 // TODO: Check for errors. See: https://code.google.com/chrome/extensions/dev/storage.html
+
+
+if (typeof(Utils) === 'undefined' && typeof(Components) !== 'undefined') {
+  var scriptLoader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
+                               .getService(Components.interfaces.mozIJSSubScriptLoader);
+  scriptLoader.loadSubScript('resource://markdown_here_common/utils.js');
+}
+
 
 var ChromeOptionsStore = {
 
@@ -108,9 +116,12 @@ var ChromeOptionsStore = {
   defaults: {
     'main-css': {'__defaultFromFile__': '/common/default.css', '__mimeType__': 'text/css'},
     'syntax-css': {'__defaultFromFile__': '/common/highlightjs/styles/github.css', '__mimeType__': 'text/css'},
-    'math-enabled': false,
+    'math-enabled': true,
     'math-value': '<img src="https://chart.googleapis.com/chart?cht=tx&chl={urlmathcode}" alt="{mathcode}">',
-    'hotkey': { shiftKey: false, ctrlKey: true, altKey: true, key: 'M' }
+    'hotkey': { shiftKey: false, ctrlKey: true, altKey: true, key: 'M' },
+    'forgot-to-render-check-enabled': true,
+    'header-anchors-enabled': false,
+    'gfm-line-breaks-enabled': true
   },
 
   // Stored string pieces look like: {'key##0': 'the quick ', 'key##1': 'brown fox'}
@@ -151,7 +162,7 @@ var ChromeOptionsStore = {
     }
     else {
       // Make this actually an async call.
-      setTimeout(function() {
+      Utils.nextTick(function() {
         var i, obj = {};
         for (i = 0; i < localStorage.length; i++) {
           // Older settings aren't JSON-encoded, so they'll throw an exception.
@@ -180,7 +191,7 @@ var ChromeOptionsStore = {
     }
     else {
       // Make this actually an async call.
-      setTimeout(function() {
+      Utils.nextTick(function() {
         var key;
         for (key in finalobj) {
           localStorage.setItem(key, finalobj[key]);
@@ -198,7 +209,7 @@ var ChromeOptionsStore = {
     }
     else {
       // Make this actually an async call.
-      setTimeout(function() {
+      Utils.nextTick(function() {
         var i;
         for (i = 0; i < keysToDelete.length; i++) {
           localStorage.removeItem(keysToDelete[i]);
@@ -249,69 +260,96 @@ var MozillaOptionsStore = {
 
   get: function(callback) {
     var that = this;
-    this._sendRequest({action: 'get'}, function(prefsObj) {
+    this._sendRequest({verb: 'get'}, function(prefsObj) {
       that._fillDefaults(prefsObj, callback);
     });
   },
 
   set: function(obj, callback) {
-    this._sendRequest({action: 'set', obj: obj}, callback);
+    this._sendRequest({verb: 'set', obj: obj}, callback);
   },
 
   remove: function(arrayOfKeys, callback) {
-    this._sendRequest({action: 'clear', obj: arrayOfKeys}, callback);
+    this._sendRequest({verb: 'clear', obj: arrayOfKeys}, callback);
   },
 
   // The default values or URLs for our various options.
   defaults: {
     'main-css': {'__defaultFromFile__': 'resource://markdown_here_common/default.css', '__mimeType__': 'text/css'},
     'syntax-css': {'__defaultFromFile__': 'resource://markdown_here_common/highlightjs/styles/github.css', '__mimeType__': 'text/css'},
-    'math-enabled': false,
+    'math-enabled': true,
     'math-value': '<img src="https://chart.googleapis.com/chart?cht=tx&chl={urlmathcode}" alt="{mathcode}">',
     'hotkey': { shiftKey: false, ctrlKey: true, altKey: true, key: 'M' },
-    'local-first-run': true
+    'local-first-run': true,
+    'forgot-to-render-check-enabled': true,
+    'header-anchors-enabled': false,
+    'gfm-line-breaks-enabled': true
   },
 
   // This is called both from content and background scripts, and we need vastly
   // different code in those cases. When calling from a content script, we need
-  // to make a request to a background service (found in firefox/chrome/content/options.js).
+  // to make a request to a background service (found in firefox/chrome/content/background-services.js).
   // When called from a background script, we're going to access the browser prefs
   // directly. Unfortunately, this means duplicating some code from the background
   // service.
-  _sendRequest: function(data, callback) { // analogue of chrome.extension.sendRequest
-    var prefs, prefKeys, prefsObj, request, sender, i;
+  _sendRequest: function(data, callback) { // analogue of chrome.extension.sendMessage
+    var extPrefsBranch, supportString, prefKeys, prefsObj, request, sender, i;
 
     try {
-      prefs = Components.classes['@mozilla.org/preferences-service;1']
-                        .getService(Components.interfaces.nsIPrefService)
-                        .getBranch('extensions.markdown-here.');
+      extPrefsBranch = window.Components.classes['@mozilla.org/preferences-service;1']
+                             .getService(Components.interfaces.nsIPrefService)
+                             .getBranch('extensions.markdown-here.');
+      supportString = Components.classes["@mozilla.org/supports-string;1"]
+                                .createInstance(Components.interfaces.nsISupportsString);
 
-      if (data.action === 'get') {
-        prefKeys = prefs.getChildList('');
+      if (data.verb === 'get') {
+        prefKeys = extPrefsBranch.getChildList('');
         prefsObj = {};
 
         for (i = 0; i < prefKeys.length; i++) {
-          prefsObj[prefKeys[i]] = JSON.parse(prefs.getCharPref(prefKeys[i]));
+          // All of our legitimate prefs should be strings, but issue #237 suggests
+          // that things may sometimes get into a bad state. We will check and delete
+          // and prefs that aren't strings.
+          // https://github.com/adam-p/markdown-here/issues/237
+          if (extPrefsBranch.getPrefType(prefKeys[i]) !== extPrefsBranch.PREF_STRING) {
+            extPrefsBranch.clearUserPref(prefKeys[i]);
+            continue;
+          }
+
+          try {
+            prefsObj[prefKeys[i]] = window.JSON.parse(
+                                      extPrefsBranch.getComplexValue(
+                                        prefKeys[i],
+                                        Components.interfaces.nsISupportsString).data);
+          }
+          catch(e) {
+            // Null values and empty strings will result in JSON exceptions
+            prefsObj[prefKeys[i]] = null;
+          }
         }
 
         callback(prefsObj);
         return;
       }
-      else if (data.action === 'set') {
+      else if (data.verb === 'set') {
         for (i in data.obj) {
-          prefs.setCharPref(i, JSON.stringify(data.obj[i]));
+          supportString.data = window.JSON.stringify(data.obj[i]);
+          extPrefsBranch.setComplexValue(
+            i,
+            Components.interfaces.nsISupportsString,
+            supportString);
         }
 
         if (callback) callback();
         return;
       }
-      else if (data.action === 'clear') {
+      else if (data.verb === 'clear') {
         if (typeof(data.obj) === 'string') {
           data.obj = [data.obj];
         }
 
         for (i = 0; i < data.obj.length; i++) {
-          prefs.clearUserPref(data.obj[i]);
+          extPrefsBranch.clearUserPref(data.obj[i]);
         }
 
         if (callback) return callback();
@@ -319,36 +357,18 @@ var MozillaOptionsStore = {
       }
     }
     catch (ex) {
+      Utils.consoleLog('Markdown Here: failing back to content script preferences code');
+      Utils.consoleLog(ex);
+
       // This exception was thrown by the Components.classes stuff above, and
       // means that this code is being called from a content script.
       // We need to send a request from this non-privileged context to the
       // privileged background script.
-      // See: https://developer.mozilla.org/en-US/docs/Code_snippets/Interaction_between_privileged_and_non-privileged_pages?redirectlocale=en-US&redirectslug=Code_snippets%3AInteraction_between_privileged_and_non-privileged_pages#Chromium-like_messaging.3A_json_request_with_json_callback
-
-      request = document.createTextNode(JSON.stringify(data));
-
-      var optionsResponseHandler = function(event) {
-        var response = null;
-
-        // There may be no response data.
-        if (request.nodeValue) {
-          response = JSON.parse(request.nodeValue);
-        }
-
-        request.parentNode.removeChild(request);
-
-        if (callback) {
-          callback(response);
-        }
-      };
-
-      request.addEventListener('markdown_here-options-response', optionsResponseHandler, false);
-
-      document.head.appendChild(request);
-
-      var event = document.createEvent('HTMLEvents');
-      event.initEvent('markdown_here-options-query', true, false);
-      request.dispatchEvent(event);
+      data.action = 'prefs-access';
+      Utils.makeRequestToPrivilegedScript(
+        document,
+        data,
+        callback);
     }
   }
 };
@@ -380,22 +400,16 @@ var SafariOptionsStore = {
   _getPreferences: function(callback) {
     // Only the background script has `safari.extension.settings`.
     if (typeof(safari.extension.settings) === 'undefined') {
-      var reqID = Math.random();
-      var optionsHandler = function(event) {
-        // Only handle the request we made.
-        if (event.message && event.message.requestID === reqID) {
-          safari.self.removeEventListener('message', optionsHandler);
-          if (callback) callback(event.message.options);
-        }
-      };
-
-      safari.self.addEventListener('message', optionsHandler, true);
-
-      safari.self.tab.dispatchMessage('get-options', { requestID: reqID });
+      // We're going to assume we have Utils and document available here, which
+      // should be the case, since we should be running as a content script.
+      Utils.makeRequestToPrivilegedScript(
+        document,
+        { action: 'get-options' },
+        callback);
     }
     else {
       // Make this actually asynchronous
-      setTimeout(function() {
+      Utils.nextTick(function() {
         if (callback) callback(safari.extension.settings);
       });
     }
@@ -404,22 +418,16 @@ var SafariOptionsStore = {
   _setPreferences: function(obj, callback) {
     // Only the background script has `safari.extension.settings`.
     if (typeof(safari.extension.settings) === 'undefined') {
-      var reqID = Math.random();
-      var optionsHandler = function(event) {
-        // Only handle the request we made.
-        if (event.message && event.message.requestID === reqID) {
-          safari.self.removeEventListener('message', optionsHandler);
-          if (callback) callback();
-        }
-      };
-
-      safari.self.addEventListener('message', optionsHandler, true);
-
-      safari.self.tab.dispatchMessage('set-options', { options: obj, requestID: reqID });
+      // We're going to assume we have Utils and document available here, which
+      // should be the case, since we should be running as a content script.
+      Utils.makeRequestToPrivilegedScript(
+        document,
+        { action: 'set-options', options: obj },
+        callback);
     }
     else {
       // Make this actually asynchronous
-      setTimeout(function() {
+      Utils.nextTick(function() {
         for (var key in obj) {
           safari.extension.settings[key] = obj[key];
         }
@@ -432,22 +440,16 @@ var SafariOptionsStore = {
   _removePreferences: function(arrayOfKeys, callback) {
     // Only the background script has `safari.extension.settings`.
     if (typeof(safari.extension.settings) === 'undefined') {
-      var reqID = Math.random();
-      var optionsHandler = function(event) {
-        // Only handle the request we made.
-        if (event.message && event.message.requestID === reqID) {
-          safari.self.removeEventListener('message', optionsHandler);
-          if (callback) callback();
-        }
-      };
-
-      safari.self.addEventListener('message', optionsHandler, true);
-
-      safari.self.tab.dispatchMessage('remove-options', { arrayOfKeys: arrayOfKeys, requestID: reqID });
+      // We're going to assume we have Utils and document available here, which
+      // should be the case, since we should be running as a content script.
+      Utils.makeRequestToPrivilegedScript(
+        document,
+        { action: 'remove-options', arrayOfKeys: arrayOfKeys },
+        callback);
     }
     else {
       // Make this actually asynchronous
-      setTimeout(function() {
+      Utils.nextTick(function() {
         var i;
         if (typeof(arrayOfKeys) === 'string') {
           arrayOfKeys = [arrayOfKeys];
@@ -466,9 +468,12 @@ var SafariOptionsStore = {
   defaults: {
     'main-css': {'__defaultFromFile__': (typeof(safari) !== 'undefined' ? safari.extension.baseURI : '')+'markdown-here/src/common/default.css', '__mimeType__': 'text/css'},
     'syntax-css': {'__defaultFromFile__': (typeof(safari) !== 'undefined' ? safari.extension.baseURI : '')+'markdown-here/src/common/highlightjs/styles/github.css', '__mimeType__': 'text/css'},
-    'math-enabled': false,
+    'math-enabled': true,
     'math-value': '<img src="https://chart.googleapis.com/chart?cht=tx&chl={urlmathcode}" alt="{mathcode}">',
-    'hotkey': { shiftKey: false, ctrlKey: true, altKey: true, key: 'M' }
+    'hotkey': { shiftKey: false, ctrlKey: true, altKey: true, key: 'M' },
+    'forgot-to-render-check-enabled': true,
+    'header-anchors-enabled': false,
+    'gfm-line-breaks-enabled': true
   }
 };
 
@@ -509,7 +514,7 @@ this.OptionsStore._fillDefaults = function(prefsObj, callback) {
     // Only take action if the key doesn't already have a value set.
     if (typeof(prefsObj[key]) === 'undefined') {
       if (that.defaults[key].hasOwnProperty('__defaultFromFile__')) {
-        var xhr = new XMLHttpRequest();
+        var xhr = new window.XMLHttpRequest();
 
         if (that.defaults[key]['__mimeType__']) {
           xhr.overrideMimeType(that.defaults[key]['__mimeType__']);
@@ -531,7 +536,7 @@ this.OptionsStore._fillDefaults = function(prefsObj, callback) {
       }
       else {
         // Make it actually asynchronous
-        setTimeout(function() {
+        Utils.nextTick(function() {
           prefsObj[key] = that.defaults[key];
           return callback();
         });
@@ -539,7 +544,7 @@ this.OptionsStore._fillDefaults = function(prefsObj, callback) {
     }
     else {
       // Just skip it, but make it asynchronous
-      setTimeout(function() {
+      Utils.nextTick(function() {
         return callback();
       });
     }

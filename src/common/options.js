@@ -1,21 +1,27 @@
 /*
- * Copyright Adam Pritchard 2012
+ * Copyright Adam Pritchard 2013
  * MIT License : http://adampritchard.mit-license.org/
  */
 
 "use strict";
-/*global OptionsStore:false, chrome:false, markdownRender:false, $:false,
-  htmlToText:false, marked:false, hljs:false, markdownHere:false, Utils:false*/
+/*jshint browser:true, jquery:true, sub:true */
+/*global OptionsStore:false, chrome:false, markdownRender:false,
+  htmlToText:false, marked:false, hljs:false, markdownHere:false, Utils:false,
+  MdhHtmlToText:false */
 
 /*
  * Main script file for the options page.
  */
 
 var cssEdit, cssSyntaxEdit, cssSyntaxSelect, rawMarkdownIframe, savedMsg,
-    mathEnable, mathEdit, hotkeyShift, hotkeyCtrl, hotkeyAlt, hotkeyKey;
+    mathEnable, mathEdit, hotkeyShift, hotkeyCtrl, hotkeyAlt, hotkeyKey,
+    forgotToRenderCheckEnabled, headerAnchorsEnabled, gfmLineBreaksEnabled,
+    loaded = false;
 
 function onLoad() {
   var xhr;
+
+  localize();
 
   // Show/hide elements depending on platform
   showPlatformElements();
@@ -32,6 +38,9 @@ function onLoad() {
   hotkeyCtrl = document.getElementById('hotkey-ctrl');
   hotkeyAlt = document.getElementById('hotkey-alt');
   hotkeyKey = document.getElementById('hotkey-key');
+  forgotToRenderCheckEnabled = document.getElementById('forgot-to-render-check-enabled');
+  headerAnchorsEnabled = document.getElementById('header-anchors-enabled');
+  gfmLineBreaksEnabled = document.getElementById('gfm-line-breaks-enabled');
 
   //
   // Syntax highlighting styles and selection
@@ -50,7 +59,7 @@ function onLoad() {
         cssSyntaxSelect.options.add(new Option(name, syntaxStyles[name]));
       }
 
-      cssSyntaxSelect.options.add(new Option('Currently in use', ''));
+      cssSyntaxSelect.options.add(new Option(Utils.getMessage('currently_in_use'), ''));
       cssSyntaxSelect.selectedIndex = cssSyntaxSelect.options.length - 1;
 
       cssSyntaxSelect.addEventListener('change', cssSyntaxSelectChange);
@@ -76,6 +85,12 @@ function onLoad() {
 
     hotkeyChangeHandler();
 
+    forgotToRenderCheckEnabled.checked = prefs['forgot-to-render-check-enabled'];
+
+    headerAnchorsEnabled.checked = prefs['header-anchors-enabled'];
+
+    gfmLineBreaksEnabled.checked = prefs['gfm-line-breaks-enabled'];
+
     // Start watching for changes to the styles.
     setInterval(checkChange, 100);
   });
@@ -85,58 +100,87 @@ function onLoad() {
 
   showDonatePlea();
 
+  // Special effort is required to open the test page in these clients.
+  if (navigator.userAgent.indexOf('Thunderbird') >= 0 ||
+      navigator.userAgent.indexOf('Icedove') >= 0 ||
+      navigator.userAgent.indexOf('Postbox') >= 0 ||
+      navigator.userAgent.indexOf('Zotero') >= 0) {
+    $('#tests-link').click(function(event) {
+      event.preventDefault();
+      Utils.makeRequestToPrivilegedScript(
+        document,
+        { action: 'open-tab', url: $('#tests-link a').prop('href') });
+    });
+  }
+
   // Hide the tests link if the page isn't available. It may be stripped out
-  // of extension packages, and it doesn't work in Thunderbird/Postbox.
-  if (navigator.userAgent.indexOf('Chrome') < 0 &&
-      navigator.userAgent.indexOf('Firefox') < 0 &&
-      typeof(safari) === 'undefined') {
-    $('#tests-link').hide();
-  }
-  else {
-    // Check if our test file exists.
-    // Note: Using $.ajax won't work because for local requests Firefox sets
-    // status to 0 even on success. jQuery interprets this as an error.
-    xhr = new XMLHttpRequest();
-    xhr.open('HEAD', './test/index.html');
-    // If we don't set the mimetype, Firefox will complain.
-    xhr.overrideMimeType('text/plain');
-    xhr.onreadystatechange = function() {
-      if (this.readyState === this.DONE && !this.responseText) {
-        // The test files aren't present, so hide the button.
-        $('#tests-link').hide();
-      }
-    };
-    xhr.send();
-  }
+  // of extension packages.
+
+  // Check if our test file exists.
+  Utils.getLocalFile('./test/index.html', 'text/html', function(_, err) {
+    // The test files aren't present, so hide the button.
+    if (err) {
+      // The test files aren't present, so hide the button.
+      $('#tests-link').hide();
+    }
+  });
+
+  loaded = true;
 }
 document.addEventListener('DOMContentLoaded', onLoad, false);
 
 
 // The Preview <iframe> will let us know when it's loaded, so that we can
 // trigger the rendering of it.
-document.addEventListener('options-iframe-loaded', function() {
-  renderMarkdown();
-});
+function previewIframeLoaded() {
+  // Even though the IFrame is loaded, the page DOM might not be, so we don't
+  // yet have a valid state. In that case, set a timer.
+  if (loaded) {
+    renderMarkdown();
+  }
+  else {
+    setTimeout(previewIframeLoaded, 100);
+  }
+}
+document.addEventListener('options-iframe-loaded', previewIframeLoaded);
+
+
+function localize() {
+  Utils.registerStringBundleLoadListener(function localizeHelper() {
+    $('[data-i18n]').each(function() {
+      var messageID = 'options_page__' + $(this).data('i18n');
+      if (this.tagName.toUpperCase() === 'TITLE') {
+        this.innerText = Utils.getMessage(messageID);
+      }
+      else {
+        Utils.saferSetInnerHTML(this, Utils.getMessage(messageID));
+      }
+    });
+
+    // Take this opportunity to show appropriate size images for the pixel
+    // density. This saves us from having to make the `img` tags in the
+    // translated content more complex.
+    if (window.devicePixelRatio === 2) {
+      $('img[src="images/icon16.png"]').css('width', '16px')
+                                       .attr('src', 'images/icon16@2x.png');
+    }
+  });
+}
 
 
 // Shows/hide page elements depending on the current platform.
 // E.g., not all usage instructions apply to all clients.
 function showPlatformElements() {
-  // This could be done more elegantly, but...
-  if (navigator.userAgent.indexOf('Thunderbird') >= 0 ||
-      navigator.userAgent.indexOf('Icedove') >= 0 ||
-      navigator.userAgent.indexOf('Postbox') >= 0 ||
-      navigator.userAgent.indexOf('Firefox') >= 0) {
+  if (typeof(chrome) !== 'undefined' && typeof(chrome.extension) !== 'undefined') {
+    // Webkit-derived platforms
     $('#need-page-reload').css('display', 'none');
   }
-  else if (navigator.userAgent.indexOf('Chrome') >= 0 ||
-           navigator.userAgent.match(/AppleWebKit.*Version.*Safari/)) {
+  else {
+    // Mozilla-derived platforms
     $('#need-page-reload').css('display', '');
   }
-  else {
-    // Shouldn't happen. Don't modify anything.
-  }
 }
+
 
 // If the CSS changes and the Markdown compose box is rendered, update the
 // rendering by toggling twice. If the compose box is not rendered, do nothing.
@@ -148,7 +192,9 @@ function checkChange() {
   var newOptions =
         cssEdit.value + cssSyntaxEdit.value +
         mathEnable.checked + mathEdit.value +
-        hotkeyShift.checked + hotkeyCtrl.checked + hotkeyAlt.checked + hotkeyKey.value;
+        hotkeyShift.checked + hotkeyCtrl.checked + hotkeyAlt.checked + hotkeyKey.value +
+        forgotToRenderCheckEnabled.checked + headerAnchorsEnabled.checked +
+        gfmLineBreaksEnabled.checked;
 
   if (newOptions !== lastOptions) {
     // CSS has changed.
@@ -176,7 +222,10 @@ function checkChange() {
                       ctrlKey: hotkeyCtrl.checked,
                       altKey: hotkeyAlt.checked,
                       key: hotkeyKey.value
-                    }
+                    },
+          'forgot-to-render-check-enabled': forgotToRenderCheckEnabled.checked,
+          'header-anchors-enabled': headerAnchorsEnabled.checked,
+          'gfm-line-breaks-enabled': gfmLineBreaksEnabled.checked
         },
         function() {
           updateMarkdownRender();
@@ -200,28 +249,16 @@ function checkChange() {
 }
 
 // This function stolen entirely from contentscript.js and ff-overlay.js
-function requestMarkdownConversion(html, callback) {
-  if (typeof(chrome) !== 'undefined' && typeof(chrome.extension) !== 'undefined') {
-    // Send a request to the add-on script to actually do the rendering.
-    chrome.extension.sendRequest({action: 'render', html: html}, function(response) {
-      callback(response.html, response.css);
+function requestMarkdownConversion(elem, range, callback) {
+  var mdhHtmlToText = new MdhHtmlToText.MdhHtmlToText(elem, range);
+
+  Utils.makeRequestToPrivilegedScript(
+    document,
+    { action: 'render', mdText: mdhHtmlToText.get() },
+    function(response) {
+      var renderedMarkdown = mdhHtmlToText.postprocess(response.html);
+      callback(renderedMarkdown, response.css);
     });
-  }
-  else {
-    // TODO: Implement a background script render service that can be used like
-    // the Chrome one.
-    OptionsStore.get(function(prefs) {
-      callback(
-        markdownRender(
-          prefs,
-          htmlToText,
-          marked,
-          hljs,
-          html,
-          rawMarkdownIframe.contentDocument),
-        (prefs['main-css'] + prefs['syntax-css']));
-    });
-  }
 }
 
 // Render the sample Markdown.
@@ -239,7 +276,7 @@ function renderMarkdown(postRenderCallback) {
   // can call the `postRenderCallback` -- we'll intercept the callback used
   // by the rendering service.
 
-  function requestMarkdownConversionInterceptor(html, callback) {
+  function requestMarkdownConversionInterceptor(elem, range, callback) {
 
     function callbackInterceptor() {
       callback.apply(null, arguments);
@@ -249,7 +286,7 @@ function renderMarkdown(postRenderCallback) {
     }
 
     // Call the real rendering service.
-    requestMarkdownConversion(html, callbackInterceptor);
+    requestMarkdownConversion(elem, range, callbackInterceptor);
   }
 }
 
@@ -346,10 +383,13 @@ function loadChangelist() {
         prevVer = prevVer[1]; // capture group
 
         var prevVerStart = $('#changelist h2').filter(function() { return $(this).text().match(new RegExp('v'+prevVer+'$')); });
-        $('#changelist').find('h1:first').after('<h2>NEW</h2>').nextUntil(prevVerStart).wrapAll('<div class="changelist-new"></div>');
+        $('#changelist').find('h1:first')
+          .after('<h2>' + Utils.getMessage('new_changelist_items') + '</h2>')
+          .nextUntil(prevVerStart)
+          .wrapAll('<div class="changelist-new"></div>');
 
         // Move the changelist section up in the page
-        $('#changelist-container').insertBefore('#options-container');
+        $('#changelist-container').insertAfter('#pagehead');
       }
     }
   };
@@ -401,31 +441,32 @@ function hotkeyChangeHandler() {
   // Set any representations of the hotkey to the new value.
 
   var hotkeyPieces = [];
-  if (hotkeyShift.checked) hotkeyPieces.push('SHIFT');
-  if (hotkeyCtrl.checked) hotkeyPieces.push('CTRL');
-  if (hotkeyAlt.checked) hotkeyPieces.push('ALT');
+  if (hotkeyShift.checked) hotkeyPieces.push(Utils.getMessage('options_page__hotkey_shift_key'));
+  if (hotkeyCtrl.checked) hotkeyPieces.push(Utils.getMessage('options_page__hotkey_ctrl_key'));
+  if (hotkeyAlt.checked) hotkeyPieces.push(Utils.getMessage('options_page__hotkey_alt_key'));
   if (hotkeyKey.value) hotkeyPieces.push(hotkeyKey.value.toString().toUpperCase());
 
-  $('.hotkey-display').each(function(hotkeyElem) {
+  $('.hotkey-display').each(function() {
+    var $hotkeyElem = $(this);
     if (hotkeyKey.value) {
-      if ($(hotkeyElem).parent().hasClass('hotkey-display-wrapper')) {
-        $(hotkeyElem).parent().css({display: ''});
+      if ($hotkeyElem.parent().hasClass('hotkey-display-wrapper')) {
+        $hotkeyElem.parent().css({display: ''});
       }
-      $(hotkeyElem).css({display: ''});
-      $(hotkeyElem).empty();
+      $hotkeyElem.css({display: ''});
+      $hotkeyElem.empty();
 
       $.each(hotkeyPieces, function(idx, piece) {
         if (idx > 0) {
-          $(hotkeyElem).append(document.createTextNode('+'));
+          $hotkeyElem.append(document.createTextNode(Utils.getMessage('options_page__hotkey_plus')));
         }
-        $(hotkeyElem).append('<kbd>').text(piece);
+        $('<kbd>').text(piece).appendTo($hotkeyElem);
       });
     }
     else {
-      if ($(hotkeyElem).parent().hasClass('hotkey-display-wrapper')) {
-        $(hotkeyElem).parent().css({display: 'none'});
+      if ($hotkeyElem.parent().hasClass('hotkey-display-wrapper')) {
+        $hotkeyElem.parent().css({display: 'none'});
       }
-      $(hotkeyElem).css({display: 'none'});
+      $hotkeyElem.css({display: 'none'});
     }
   });
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright Adam Pritchard 2012
+ * Copyright Adam Pritchard 2014
  * MIT License : http://adampritchard.mit-license.org/
  */
 
@@ -9,14 +9,47 @@
  * actually does it (calling out for the final render).
  */
 
+/*
+Regarding our rendered Markdown "wrappers": When we render a some Markdown
+-- whether it's the entire content or sub-selection -- we need to save the
+original Markdown (actually, Markdown-in-HTML) somewhere so that we can later
+unrender if the user requests it. Where to save the original markdown is a
+difficult decision, since many web interface will disallow or strip certain
+attributes or attribute values (etc.).
+
+We have found that the `title` attribute of a `<div>` element is preserved. (In
+the sites tested at the time of writing.) So we're create an empty `<div>`, and
+store the original MD in the `title` attribute, prefixed with a marker (`MDH:`)
+to help prevent false positives when looking for wrappers.
+
+Then, looking for "wrappers" will involve looking for the "div with original MD
+in title" and then getting its parent.
+
+(The reason that we're not storing the MD in the title of the wrapper itself is
+that that will result in the raw MD being shown as a tooltip when the user
+hovers over the wrapper. The extra empty div won't have any size, so there
+won't be a hover problem.)
+
+For info about the ideas we had and experiments we ran, see:
+https://github.com/adam-p/markdown-here/issues/85
+*/
+
+
 ;(function() {
 
 "use strict";
 /*global module:false*/
 
+
+var WRAPPER_TITLE_PREFIX = 'MDH:';
+
+
 // In Firefox/Thunderbird, Utils won't already exist.
-if (typeof(Utils) === 'undefined') {
-  Components.utils.import('resource://markdown_here_common/utils.js');
+if (typeof(Utils) === 'undefined' &&
+    typeof(safari) === 'undefined' && typeof(chrome) === 'undefined') {
+  var scriptLoader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
+                               .getService(Components.interfaces.mozIJSSubScriptLoader);
+  scriptLoader.loadSubScript('resource://markdown_here_common/utils.js');
 }
 
 // For debugging purposes. An external service is required to log with Firefox.
@@ -26,6 +59,20 @@ var mylog = function() {};
 // iframes if necessary.
 function findFocusedElem(document) {
   var focusedElem = document.activeElement;
+
+  // Fix #173: https://github.com/adam-p/markdown-here/issues/173
+  // If the focus is in an iframe with a different origin, then attempting to
+  // access focusedElem.contentDocument will fail with a `SecurityError`:
+  // "Failed to read the 'contentDocument' property from 'HTMLIFrameElement': Blocked a frame with origin "http://jsbin.io" from accessing a cross-origin frame."
+  // Rather than spam the console with exceptions, we'll treat this as an
+  // unrenderable situation (which it is).
+  try {
+    var accessTest = focusedElem.contentDocument;
+  }
+  catch (e) {
+    // TODO: Check that this is actually a SecurityError and re-throw if it's not?
+    return null;
+  }
 
   // If the focus is within an iframe, we'll have to drill down to get to the
   // actual element.
@@ -59,14 +106,7 @@ function elementCanBeRendered(elem) {
 function getOperationalRange(focusedElem) {
   var selection, range, sig;
 
-  selection = focusedElem.ownerDocument.getSelection();
-
-  // For some reason Postbox requires window.getSelection() rather than
-  // document.getSelection(). It doesn't fail, but there's a deprecation
-  // warning, and then selection.getRangeAt() fails as undefined.
-  if (typeof(selection.getRangeAt) === 'undefined') {
-    selection = focusedElem.ownerDocument.defaultView.getSelection();
-  }
+  selection = focusedElem.ownerDocument.defaultView.getSelection();
 
   if (selection.rangeCount < 1) {
     return null;
@@ -220,48 +260,51 @@ function makeStylesExplicit(wrapperElem, css) {
   for (i = 0; i < stylesheet.cssRules.length; i++) {
     rule = stylesheet.cssRules[i];
 
-    // Special case for the selector: If the selector is '.markdown-here-wrapper',
-    // then we want to apply the rules to the wrapper (not just to its ancestors,
-    // which is what querySelectorAll gives us).
     // Note that the CSS should not have any rules that use "body" or "html".
 
-    if (rule.selectorText === '.markdown-here-wrapper') {
-      wrapperElem.setAttribute('style', rule.style.cssText);
-    }
-    else {
-      selectorMatches = wrapperElem.querySelectorAll(rule.selectorText);
-      for (j = 0; j < selectorMatches.length; j++) {
+    // We're starting our search one level above the wrapper, which means we
+    // might match stuff outside of our wrapper. We'll have to double-check below.
+    selectorMatches = wrapperElem.parentNode.querySelectorAll(rule.selectorText);
 
-        // Make sure the selector match isn't inside an exclusion block.
-        elem = selectorMatches[j];
-        while (elem) {
-          if (elem.classList.contains('markdown-here-exclude')) {
-            elem = 'excluded';
-            break;
-          }
-          elem = elem.parentElement;
-        }
-        if (elem === 'excluded') {
-          // Don't style this element.
-          continue;
-        }
+    for (j = 0; j < selectorMatches.length; j++) {
+      elem = selectorMatches[j];
 
-        // Get the existing styles for the element.
-        styleAttr = selectorMatches[j].getAttribute('style') || '';
-
-        // Append the new styles to the end of the existing styles. This will
-        // give the new ones precedence if any are the same as existing ones.
-
-        // Make sure existing styles end with a semicolon.
-        if (styleAttr && styleAttr.search(/;[\s]*$/) < 0) {
-          styleAttr += '; ';
-        }
-
-        styleAttr += rule.style.cssText;
-
-        // Set the styles back.
-        selectorMatches[j].setAttribute('style', styleAttr);
+      // Make sure the element is inside our wrapper (or is our wrapper).
+      if (elem !== wrapperElem &&
+          !Utils.isElementDescendant(wrapperElem, elem)) {
+        continue;
       }
+
+      // Make sure the selector match isn't inside an exclusion block.
+      // The check for `elem.classList` stop us if we hit a non-element node
+      // while going up through the parents.
+      while (elem && (typeof(elem.classList) !== 'undefined')) {
+        if (elem.classList.contains('markdown-here-exclude')) {
+          elem = 'excluded';
+          break;
+        }
+        elem = elem.parentNode;
+      }
+      if (elem === 'excluded') {
+        // Don't style this element.
+        continue;
+      }
+
+      // Get the existing styles for the element.
+      styleAttr = selectorMatches[j].getAttribute('style') || '';
+
+      // Append the new styles to the end of the existing styles. This will
+      // give the new ones precedence if any are the same as existing ones.
+
+      // Make sure existing styles end with a semicolon.
+      if (styleAttr && styleAttr.search(/;[\s]*$/) < 0) {
+        styleAttr += '; ';
+      }
+
+      styleAttr += rule.style.cssText;
+
+      // Set the styles back.
+      selectorMatches[j].setAttribute('style', styleAttr);
     }
   }
 }
@@ -271,31 +314,46 @@ function hasParentElementOfTagName(element, tagName) {
 
   tagName = tagName.toUpperCase();
 
-  parent = element.parentElement;
+  parent = element.parentNode;
   while (parent) {
     if (parent.nodeName === tagName) {
       return true;
     }
 
-    parent = parent.parentElement;
+    parent = parent.parentNode;
   }
 
   return false;
 }
+
+
+function isWrapperElem(elem) {
+  // Make sure the candidate is an element node
+  if (elem.nodeType === elem.ELEMENT_NODE) {
+    // A MDH wrapper has a child element with a specially prefixed title.
+    var rawHolder = elem.querySelector('[title^="' + WRAPPER_TITLE_PREFIX + '"]');
+
+    if (rawHolder &&
+        // The above `querySelector` will also look at grandchildren of
+        // `elem`, which we don't want.
+        rawHolder.parentNode === elem &&
+        // Skip all wrappers that are in a `blockquote`. We don't want to revert
+        // Markdown that was sent to us.
+        !hasParentElementOfTagName(elem, 'BLOCKQUOTE')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 
 // Find the wrapper element that's above the current cursor position and returns
 // it. Returns falsy if there is no wrapper.
 function findMarkdownHereWrapper(focusedElem) {
   var selection, range, wrapper = null;
 
-  selection = focusedElem.ownerDocument.getSelection();
-
-  // For some reason Postbox requires window.getSelection() rather than
-  // document.getSelection(). It doesn't fail, but there's a deprecation
-  // warning, and then selection.getRangeAt() fails as undefined.
-  if (typeof(selection.getRangeAt) === 'undefined') {
-    selection = focusedElem.ownerDocument.defaultView.getSelection();
-  }
+  selection = focusedElem.ownerDocument.defaultView.getSelection();
 
   if (selection.rangeCount < 1) {
     return null;
@@ -304,108 +362,135 @@ function findMarkdownHereWrapper(focusedElem) {
   range = selection.getRangeAt(0);
 
   wrapper = range.commonAncestorContainer;
-  while (wrapper) {
-    // Skip all wrappers that are in a `blockquote`. We don't want to revert
-    // Markdown that was sent to us.
-    if (wrapper.classList && wrapper.classList.contains('markdown-here-wrapper') &&
-        wrapper.attributes && wrapper.attributes.getNamedItem('data-md-original') &&
-        !hasParentElementOfTagName(wrapper, 'BLOCKQUOTE')) {
-      break;
-    }
-
-    wrapper = wrapper.parentElement;
+  while (wrapper && !isWrapperElem(wrapper)) {
+    wrapper = wrapper.parentNode;
   }
 
   return wrapper;
 }
 
+
 // Finds all Markdown Here wrappers in the given range. Returns an array of the
 // wrapper elements, or null if no wrappers found.
 function findMarkdownHereWrappersInRange(range) {
-  var documentFragment, cloneWrappers, wrappers, selection, i;
+  // Adapted from: http://stackoverflow.com/a/1483487/729729
+  var containerElement = range.commonAncestorContainer;
+  if (containerElement.nodeType != containerElement.ELEMENT_NODE) {
+    containerElement = containerElement.parentNode;
+  }
 
-  // Finding elements in a range isn't very simple...
+  var elems = [];
 
-  // Clone the contents of the range.
-  documentFragment = range.cloneContents();
+  var nodeTester = function(elem) {
+    if (elem.nodeType === elem.ELEMENT_NODE &&
+        Utils.rangeIntersectsNode(range, elem) &&
+        isWrapperElem(elem)) {
+          elems.push(elem);
+    }
+  };
 
-  // Find all wrappers. Require the presence of the `data-md-original` attribute.
-  cloneWrappers = documentFragment.querySelectorAll('.markdown-here-wrapper[data-md-original]');
+  Utils.walkDOM(containerElement, nodeTester);
 
-  if (cloneWrappers && cloneWrappers.length > 0) {
-    // Now we have an array of *copies* of the wrappers in the DOM. Find them in
-    // the DOM from their IDs. This is why we need unique IDs for our wrappers.
-
-    wrappers = [];
-
-    for (i = 0; i < cloneWrappers.length; i++) {
-
-      // Require that the `data-md-original` attribute actually have content.
-      if (!cloneWrappers[i].attributes.getNamedItem('data-md-original')) {
-        continue;
-      }
-
-      // Skip all wrappers that are in a `blockquote`. We don't want to revert
-      // Markdown that was sent to us.
-      if (hasParentElementOfTagName(cloneWrappers[i], 'BLOCKQUOTE')) {
-        continue;
-      }
-
-      wrappers.push(range.commonAncestorContainer.ownerDocument.getElementById(cloneWrappers[i].id));
+  /*
+  // This code is probably superior, but TreeWalker is not supported by Postbox.
+  // If this ends up getting used, it should probably be moved into walkDOM
+  // (or walkDOM should be removed).
+  var nodeTester = function(node) {
+    if (node.nodeType !== node.ELEMENT_NODE ||
+        !Utils.rangeIntersectsNode(range, node) ||
+        !isWrapperElem(node)) {
+      return node.ownerDocument.defaultView.NodeFilter.FILTER_SKIP;
     }
 
-    return wrappers;
+    return node.ownerDocument.defaultView.NodeFilter.FILTER_ACCEPT;
+  };
+
+  var treeWalker = containerElement.ownerDocument.createTreeWalker(
+      containerElement,
+      containerElement.ownerDocument.defaultView.NodeFilter.SHOW_ELEMENT,
+      nodeTester,
+      false);
+
+  var elems = [];
+  while (treeWalker.nextNode()) {
+    elems.push(treeWalker.currentNode);
   }
-  else {
-    return null;
-  }
+  */
+
+  return elems.length ? elems : null;
 }
+
 
 // Converts the Markdown in the user's compose element to HTML and replaces it.
 // If `selectedRange` is null, then the entire email is being rendered.
-function renderMarkdown(focusedElem, selectedRange, markdownRenderer) {
-  var extractedHtml, rangeWrapper;
-
-  // Wrap the selection in a new element so that we can better extract the HTML.
-  // This modifies the DOM, but that's okay, since we're going to replace the
-  // new element in a moment.
-  rangeWrapper = focusedElem.ownerDocument.createElement('div');
-  rangeWrapper.appendChild(selectedRange.extractContents());
-  selectedRange.insertNode(rangeWrapper);
-  selectedRange.selectNode(rangeWrapper);
-
-  // Get the HTML containing the Markdown from the selection.
-  extractedHtml = rangeWrapper.innerHTML;
-
-  if (!extractedHtml || extractedHtml.length === 0) {
-    return 'No Markdown found to render';
-  }
+function renderMarkdown(focusedElem, selectedRange, markdownRenderer, renderComplete) {
+  var originalHtml = Utils.getDocumentFragmentHTML(selectedRange.cloneContents());
 
   // Call to the extension main code to actually do the md->html conversion.
-  markdownRenderer(extractedHtml, function(mdHtml, mdCss) {
-    var wrapper;
+  markdownRenderer(focusedElem, selectedRange, function(mdHtml, mdCss) {
+    var wrapper, rawHolder;
+
+    // Store the original Markdown-in-HTML to the `title` attribute of a separate,
+    // invisible-ish `div`. We have found that Gmail, Evernote, etc. leave the
+    // title intact when saving.
+    // `&#8203;` is a zero-width space: https://en.wikipedia.org/wiki/Zero-width_space
+    // Thunderbird will discard the `div` if there's no content.
+    rawHolder = '<div ' +
+                'title="' + WRAPPER_TITLE_PREFIX + Utils.utf8StringToBase64(originalHtml) + '" ' +
+                'style="height:0;width:0;max-height:0;max-width:0;overflow:hidden;font-size:0em;padding:0;margin:0;" ' +
+                '>&#8203;</div>';
 
     // Wrap our pretty HTML in a <div> wrapper.
     // We'll use the wrapper as a marker to indicate that we're in a rendered state.
     mdHtml =
-      '<div class="markdown-here-wrapper" id="markdown-here-wrapper-' + Math.floor(Math.random()*1000000) + '">' +
-      mdHtml +
+      '<div class="markdown-here-wrapper" ' +
+           'data-md-url="' + Utils.getTopURL(focusedElem.ownerDocument.defaultView, true) + '">' +
+        mdHtml +
+        rawHolder +
       '</div>';
 
-    // Store the original Markdown-in-HTML to a data attribute on the wrapper
-    // element. We'll use this later if we need to unrender back to Markdown.
     wrapper = replaceRange(selectedRange, mdHtml);
-    wrapper.setAttribute('data-md-original', extractedHtml);
 
     // Some webmail (Gmail) strips off any external style block. So we need to go
     // through our styles, explicitly applying them to matching elements.
     makeStylesExplicit(wrapper, mdCss);
+
+    // Monitor for changes to the content of the rendered MD. This will help us
+    // prevent the user from silently losing changes later.
+    // We're going to set this up after a short timeout, to help prevent false
+    // detections based on automatic changes by the host site.
+    wrapper.ownerDocument.defaultView.setTimeout(function addMutationObserver() {
+      var SupportedMutationObserver =
+            wrapper.ownerDocument.defaultView.MutationObserver ||
+            wrapper.ownerDocument.defaultView.WebKitMutationObserver;
+      if (typeof(SupportedMutationObserver) !== 'undefined') {
+        var observer = new SupportedMutationObserver(function(mutations) {
+          wrapper.setAttribute('markdown-here-wrapper-content-modified', true);
+          observer.disconnect();
+        });
+        observer.observe(wrapper, { childList: true, characterData: true, subtree: true });
+      }
+    }, 100);
+
+    renderComplete();
   });
 }
 
 // Revert the rendered Markdown wrapperElem back to its original form.
 function unrenderMarkdown(wrapperElem) {
-  var originalMdHtml = wrapperElem.getAttribute('data-md-original');
+  var rawHolder = wrapperElem.querySelector('[title^="' + WRAPPER_TITLE_PREFIX + '"]');
+  // Not checking for success of that call, since we shouldn't be here if there
+  // isn't a wrapper.
+
+  var originalMdHtml = rawHolder.getAttribute('title');
+  originalMdHtml = originalMdHtml.slice(WRAPPER_TITLE_PREFIX.length).replace(/\n/g, '');
+
+  // Thunderbird and Postbox break the long title up into multiple lines, which
+  // wrecks our ability to un-base64 it. So strip whitespace.
+  originalMdHtml = originalMdHtml.replace(/\s/g, '');
+
+  originalMdHtml = Utils.base64ToUTF8String(originalMdHtml);
+
   Utils.saferSetOuterHTML(wrapperElem, originalMdHtml);
 }
 
@@ -417,12 +502,15 @@ function unrenderMarkdown(wrapperElem) {
 //        drill down to find the correct element and document.)
 // @param `markdownRenderer`  The function that provides raw-Markdown-in-HTML
 //                            to pretty-Markdown-in-HTML rendering service.
-//                            See markdown-render.js for information.
 // @param `logger`  A function that can be used for logging debug messages. May
 //                  be null.
+// @param `renderComplete`  Callback that will be called when a render or unrender
+//                          has completed. Passed two arguments: `elem`
+//                          (the element de/rendered) and `rendered` (boolean,
+//                          true if rendered, false if derendered).
 // @returns True if successful, otherwise an error message that should be shown
 //          to the user.
-function markdownHere(document, markdownRenderer, logger) {
+function markdownHere(document, markdownRenderer, logger, renderComplete) {
 
   if (logger) {
     mylog = logger;
@@ -454,7 +542,7 @@ function markdownHere(document, markdownRenderer, logger) {
     range = getOperationalRange(focusedElem);
 
     if (!range) {
-      return 'Nothing found to render or revert';
+      return Utils.getMessage('nothing_to_render');
     }
 
     // Look for wrappers in the range under consideration.
@@ -464,12 +552,37 @@ function markdownHere(document, markdownRenderer, logger) {
   // If we've found wrappers, then we're reverting.
   // Otherwise, we're rendering.
   if (wrappers && wrappers.length > 0) {
+    var yesToAll = false;
     for (i = 0; i < wrappers.length; i++) {
+      // Has the content been modified by the user since rendering
+      if (wrappers[i].getAttribute('markdown-here-wrapper-content-modified') &&
+          !yesToAll) {
+
+          if (wrappers[i].ownerDocument.defaultView.confirm(Utils.getMessage('unrendering_modified_markdown_warning'))) {
+            yesToAll = true;
+          }
+          else {
+            break;
+          }
+      }
+
       unrenderMarkdown(wrappers[i]);
+    }
+
+    if (renderComplete) {
+      renderComplete(focusedElem, false);
     }
   }
   else {
-    renderMarkdown(focusedElem, range, markdownRenderer);
+    renderMarkdown(
+      focusedElem,
+      range,
+      markdownRenderer,
+      function() {
+        if (renderComplete) {
+          renderComplete(focusedElem, true);
+        }
+      });
   }
 
   return true;

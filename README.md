@@ -5,15 +5,16 @@
 [**Get it for Firefox.**](https://addons.mozilla.org/en-US/firefox/addon/markdown-here/)  
 [**Get it for Safari.**](https://s3.amazonaws.com/markdown-here/markdown-here.safariextz)  
 [**Get it for Thunderbird and Postbox.**](https://addons.mozilla.org/en-US/thunderbird/addon/markdown-here/)  
+[**Get it for Opera.**](https://addons.opera.com/en/extensions/details/markdown-here/)  
 [**Discuss it and ask questions in the Google Group.**](https://groups.google.com/forum/?fromgroups#!forum/markdown-here/)
 
-*Markdown Here* is a Google Chrome, Firefox, Safari, and Thunderbird extension that lets you write email<sup>&dagger;</sup> in Markdown<sup>&Dagger;</sup> and render them before sending. It also supports syntax highlighting (just specify the language in a fenced code block).
+*Markdown Here* is a Google Chrome, Firefox, Safari, Opera, and Thunderbird extension that lets you write email<sup>&dagger;</sup> in Markdown<sup>&Dagger;</sup> and render them before sending. It also supports syntax highlighting (just specify the language in a fenced code block).
 
 Writing email with code in it is pretty tedious. Writing Markdown with code in it is easy. I found myself writing email in Markdown in the Github in-browser editor, then copying the preview into email. This is a pretty absurd workflow, so I decided create a tool to write and render Markdown right in the email.
 
-To discover what can be done with Markdown in *Markdown Here*, check out the [Markdown Cheatsheet](https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet) and the other [wiki pages](https://github.com/adam-p/markdown-here/wiki).
+To discover what can be done with Markdown in *Markdown Here*, check out the [Markdown Here Cheatsheet](https://github.com/adam-p/markdown-here/wiki/Markdown-Here-Cheatsheet) and the other [wiki pages](https://github.com/adam-p/markdown-here/wiki).
 
-<sup>&dagger;: And Google Groups posts, and Wordpress posts, and Evernote notes, and Postbox! [See details](#compatibility).</sup>  
+<sup>&dagger;: And Google Groups posts, and Blogger posts, and Evernote notes, and Wordpress posts! [See more](#compatibility).</sup>  
 <sup>&Dagger;: And TeX mathematical formulae!</sup>
 
 ![screenshot of conversion](https://raw.github.com/adam-p/markdown-here/master/store-assets/markdown-here-image1.gimp.png)
@@ -71,12 +72,20 @@ After installing, make sure to restart Firefox/Thunderbird!
 
 To get to the Markdown Here preferences, open the Safari preferences and then go to the "Extensions" tab. Then click the "Click me to show Markdown Here options" box.
 
+### Opera
+
+Note that *Markdown Here* only works with Opera versions 16 and higher (i.e., the ones that are based on Chromium).
+
+Go to the [Opera Add-ons store page for *Markdown Here*](https://addons.opera.com/en/extensions/details/markdown-here/) and install normally.
+
+After installing, make sure to reload your webmail or restart Chrome!
+
 ## Usage Instructions
 
 Install it, and then…
 
-1. In Chrome and Safari, *make sure* you reload your web mail page before trying to use Markdown Here.
-2. In Chrome/Firefox/Safari, log into your Gmail, Hotmail, or Yahoo account and start a new email. In Thunderbird, start a new message.
+1. In Chrome/Safari/Opera, *make sure* you reload your web mail page before trying to use Markdown Here.
+2. In Chrome/Firefox/Safari/Opera, log into your Gmail, Hotmail, or Yahoo account and start a new email. In Thunderbird, start a new message.
 3. Make sure you're using the rich editor.
    * In Gmail, click the "Rich formatting" link, if it's visible.
    * In Thunderbird, make sure "Compose messages in HTML format" is enabled in your "Account Settings", "Composition & Addressing" pane.
@@ -135,15 +144,15 @@ The *Markdown Here* Options page can be accessed via the Chrome, Firefox, Safari
 
 For Chrome and Firefox, any changes made in the *Markdown Here* Options are automatically synchronized between your other installations of that browser (if you have the sync feature enabled in the browser). 
 
-![screenshot of options](https://raw.github.com/adam-p/markdown-here/master/store-assets/markdown-here-chrome-options.gimp.png)
+![screenshot of options](https://raw.githubusercontent.com/adam-p/markdown-here/master/store-assets/markdown-here-chrome-options-1.gimp.png)
 
 ## Troubleshooting
 
 Here are some common problems that people run into.
 
 <dl>
-  <dt>Chrome/Firefox/Safari/Thunderbird: I just installed <em>Markdown Here</em> and the context menu item isn't showing up.</dt>
-  <dd>Make sure you restarted Firefox or Thunderbird, and either restarted Chrome/Safari or reloaded your webmail page.</dd>
+  <dt>Chrome/Firefox/Safari/Opera/Thunderbird: I just installed <em>Markdown Here</em> and the context menu item isn't showing up.</dt>
+  <dd>Make sure you restarted Firefox or Thunderbird, and either restarted Chrome/Safari/Opera or reloaded your webmail page.</dd>
 </dl>
 
 ## Compatibility
@@ -179,35 +188,42 @@ Short answer: Gmail and Thunderbird are great. More info about some clients can 
     <td>
       Email received from Yahoo does not display with properly separated paragraphs. (Hotmail strips styling off <code>&lt;p&gt;</code> and <code>&lt;div&gt;</code> tags, and Yahoo uses the latter for paragraphs.)
     </td>
-    <td>No reply exclusion.</td>
+    <td>No reply exclusion. No forgot-to-render detection.</td>
   </tr>
   <tr>
     <th>Yahoo</th>
     <td>&#x2713;</td>
     <td>&#x2713;</td>
     <td>&#x2713;</td>
-    <td>No reply exclusion.</td>
+    <td>No reply exclusion. No forgot-to-render detection.</td>
   </tr>
   <tr>
     <th>Google Groups</th>
     <td>&#x2713;</td>
     <td>&#x2713;</td>
     <td>&#x2713;</td>
-    <td>Rendered version doesn't show in digest email. But that's probably true of manually-rich-edited posts as well.</td>
-  </tr>
-  <tr>
-    <th>Wordpress</th>
-    <td>Editor not exactly WYSIWYG, but Preview is accurate</td>
-    <td></td>
-    <td></td>
-    <td>See the <a href="https://github.com/adam-p/markdown-here/wiki/Compatibility">Compatibility wiki page</a> for full details and tips</td>
+    <td>Rendered version doesn't show in digest email, but that's probably true of manually-rich-edited posts as well. No forgot-to-render detection.</td>
   </tr>
   <tr>
     <th>Evernote (web interface)</th>
     <td>&#x2713;</td>
-    <td>Seems to strip newlines from <code>&lt;pre&gt;</code> blocks, which breaks display of code.</td>
+    <td>&#x2713;</td>
     <td>&#x2713;</td>
     <td></td>
+  </tr>
+  <tr>
+    <th>Blogger</th>
+    <td>&#x2713;</td>
+    <td>&#x2713;</td>
+    <td>&#x2713;</td>
+    <td></td>
+  </tr>
+  <tr>
+    <th>Wordpress</th>
+    <td>Inline code displays in non-monospace font, but is correct in preview and final post.</td>
+    <td>&#x2713;</td>
+    <td>&#x2713;</td>
+    <td>See the <a href="https://github.com/adam-p/markdown-here/wiki/Compatibility#wordpress">Compatibility wiki page</a> for full details and tips</td>
   </tr>
   <tr>
     <th>Postbox</th>
@@ -244,9 +260,13 @@ Short answer: Gmail and Thunderbird are great. More info about some clients can 
   * The use of browser-specific styles (-moz-, -webkit-) should be avoided. If used, they may not render correctly for people reading the email in a different browser from the one where the email was sent.
   * The use of state-dependent styles (like `a:hover`) don't work because they don't match at the time the styles are made explicit. (In email, styles must be explicitly applied to all elements -- stylesheets get stripped.)
 
+* For more tweaky features, visit the [Tips and Tricks](https://github.com/adam-p/markdown-here/wiki/Tips-and-Tricks) section.
+
 ## Building the Extension Bundles
 
 "Building" is really just zipping. Create all archives relative to the `src` directory.
+
+Before zipping, delete the `src/common/test` directory. This will prevent the autotests from ending up in the release.
 
 An important preparatory step is to remove any system-generated hidden files that shouldn't be 
 included in the release file (like Windows' `desktop.ini` and OS X's `.DS_Store`, etc.). This shell command will delete those unwanted files: 
@@ -255,7 +275,7 @@ included in the release file (like Windows' `desktop.ini` and OS X's `.DS_Store`
 find . -name "desktop.ini" -or -name ".*" -and -not -name "." -and -not -name ".git*" -print0 | xargs -0 rm -rf
 ```
 
-### Chrome extension
+### Chrome and Opera extension
 
 Create a file with a `.zip` extension containing these files and directories:
 
@@ -298,18 +318,6 @@ It also takes a fair bit of work to stay up-to-date with the latest changes in a
 * Syntax highlighting: [isagalaev / highlight.js](https://github.com/isagalaev/highlight.js)
 * HTML-to-text: [mtrimpe / jsHtmlToText](https://github.com/mtrimpe/jsHtmlToText)
 
-### Other stuff not used, but to keep an eye on
-
-* Markdown-to-HTML:
-  * [evilstreak / markdown-js](https://github.com/evilstreak/markdown-js) (There's currently a GFM dialect that seems almost finished. See [issue #41](https://github.com/evilstreak/markdown-js/issues/41).)
-  * [Pagedown](https://code.google.com/p/pagedown/)
-  * [isaacs / github-flavored-markdown](https://github.com/isaacs/github-flavored-markdown) (A Showdown derivative)
-  * [Showdown](https://github.com/coreyti/showdown)
-
-* HTML-to-Markdown
-  * [domchristie / to-markdown](https://github.com/domchristie/to-markdown)
-  * [leeoniya / reMarked.js](https://github.com/leeoniya/reMarked.js)
-
 ## Feedback
 
 All bugs, feature requests, pull requests, feedback, etc., are welcome. [Create an issue](https://github.com/adam-p/markdown-here/issues). Or [post to the "markdown-here" Google Group](https://groups.google.com/forum/?fromgroups=#!forum/markdown-here).
@@ -322,7 +330,7 @@ MIT License: http://adampritchard.mit-license.org/ or see [the `LICENSE` file](h
 
 ### Logo
 
-Copyright 2013, Tatiana A. Fryntoff. Licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/).
+Copyright 2013, [Tatiana A. Fryntoff](http://tatianafryntoff.com/). Licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/).
 
 ### Other images
 
